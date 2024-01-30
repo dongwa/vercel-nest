@@ -6,13 +6,12 @@ Help you to deploy [Nestjs](https://docs.nestjs.com/) application on [Vercel](ht
 
 # Usage
 
-## 2. Configure `vercel-nest` as builder in `vercel.json`
+## 1. Configure `vercel-nest` as builder in `vercel.json`
 
 ### Add a `vercel.json` file to your project root path
 
 ```json
 {
-  "version": 2,
   "builds": [
     {
       "src": "package.json",

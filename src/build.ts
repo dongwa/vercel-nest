@@ -237,38 +237,14 @@ export const build: BuildV3 = async (options) => {
 
   const handler = relative(baseDir, nestEntry);
   console.log('handler', handler);
-  // Add a `route` for Middleware
-  if (isMiddleware) {
-    if (!isEdgeFunction) {
-      // Root-level middleware file can not have `export const config = { runtime: 'nodejs' }`
-      throw new Error(
-        `Middleware file can not be a Node.js Serverless Function`
-      );
-    }
 
-    // Middleware is a catch-all for all paths unless a `matcher` property is defined
-    const src = getRegExpFromMatchers(config.matcher);
-    console.log('src', src);
-    const middlewareRawSrc: string[] = [];
-    if (config?.matcher) {
-      if (Array.isArray(config.matcher)) {
-        middlewareRawSrc.push(...config.matcher);
-      } else {
-        middlewareRawSrc.push(config.matcher as string);
-      }
-    }
-
-    routes = [
-      {
-        src,
-        dest: entrypoint,
-        middlewareRawSrc,
-        middlewarePath: handler,
-        continue: true,
-        override: true,
-      },
-    ];
-  }
+  // @TODO：support config routes and static routes
+  routes = [
+    {
+      src: '/(.*)',
+      dest: `/${entrypoint}`,
+    },
+  ];
 
   // "nodejs" runtime is the default
   const shouldAddHelpers = !(
@@ -286,6 +262,5 @@ export const build: BuildV3 = async (options) => {
     awsLambdaHandler,
     supportsResponseStreaming,
   });
-
   return { routes, output };
 };

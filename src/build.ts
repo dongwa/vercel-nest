@@ -25,15 +25,17 @@ import type {
   BuildV3,
   BuildResultV3,
   File,
+  BuildV2,
+  BuildResultV2,
+  BuildResultV2Typical,
 } from '@vercel/build-utils';
-import { getRegExpFromMatchers } from './utils';
 import { nodeFileTrace } from '@vercel/nft';
 import nftResolveDependency from '@vercel/nft/out/resolve-dependency';
 import { readFileSync, lstatSync, readlinkSync, statSync } from 'fs';
 import { isErrnoException } from '@vercel/error-utils';
 // nestjs default entry
 const nestEntry = 'dist/main.js';
-
+const nestLambdaName = 'index';
 interface DownloadOptions {
   files: Files;
   entrypoint: string;
@@ -193,7 +195,7 @@ async function getPreparedFiles(
   };
 }
 
-export const build: BuildV3 = async (options) => {
+export const build: BuildV2 = async (options) => {
   const { name, version } = await import('../package.json');
   console.log(`using ${name}@${version}`);
   const {
@@ -232,8 +234,8 @@ export const build: BuildV3 = async (options) => {
 
   console.log(`Trace complete [${Date.now() - traceTime}ms]`);
 
-  let routes: BuildResultV3['routes'];
-  let output: BuildResultV3['output'] | undefined;
+  let routes: BuildResultV2Typical['routes'];
+  let output: BuildResultV2Typical['output'] | undefined;
 
   const handler = relative(baseDir, nestEntry);
   console.log('handler', handler);
@@ -242,7 +244,7 @@ export const build: BuildV3 = async (options) => {
   routes = [
     {
       src: '/(.*)',
-      dest: `/${entrypoint}`,
+      dest: `/${nestLambdaName}`,
     },
   ];
 
@@ -253,14 +255,16 @@ export const build: BuildV3 = async (options) => {
 
   const supportsResponseStreaming = config?.supportsResponseStreaming === true;
 
-  output = new NodejsLambda({
-    files: preparedFiles,
-    handler,
-    runtime: nodeVersion.runtime,
-    shouldAddHelpers,
-    shouldAddSourcemapSupport: false,
-    awsLambdaHandler,
-    supportsResponseStreaming,
-  });
+  output = {
+    [nestLambdaName]: new NodejsLambda({
+      files: preparedFiles,
+      handler,
+      runtime: nodeVersion.runtime,
+      shouldAddHelpers,
+      shouldAddSourcemapSupport: false,
+      awsLambdaHandler,
+      supportsResponseStreaming,
+    }),
+  };
   return { routes, output };
 };

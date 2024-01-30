@@ -6,18 +6,33 @@ import {
   runPackageJsonScript,
   getNodeVersion,
   getSpawnOptions,
-  debug,
+  isSymbolicLink,
+  FileFsRef,
+  FileBlob,
 } from '@vercel/build-utils';
-import { dirname, join, relative, sep, parse as parsePath } from 'path';
+import {
+  dirname,
+  join,
+  relative,
+  sep,
+  parse as parsePath,
+  resolve,
+} from 'path';
 import type {
   Files,
   Meta,
   Config,
   BuildV3,
-  NodeVersion,
   BuildResultV3,
+  File,
 } from '@vercel/build-utils';
 import { getRegExpFromMatchers } from './utils';
+import { nodeFileTrace } from '@vercel/nft';
+import nftResolveDependency from '@vercel/nft/out/resolve-dependency';
+import { readFileSync, lstatSync, readlinkSync, statSync } from 'fs';
+import { isErrnoException } from '@vercel/error-utils';
+// nestjs default entry
+const nestEntry = 'dist/main.js';
 
 interface DownloadOptions {
   files: Files;
@@ -25,6 +40,7 @@ interface DownloadOptions {
   workPath: string;
   config: Config;
   meta: Meta;
+  baseDir: string;
 }
 
 async function downloadInstallAndBundle({
@@ -33,19 +49,14 @@ async function downloadInstallAndBundle({
   workPath,
   config,
   meta,
+  baseDir,
 }: DownloadOptions) {
   const downloadedFiles = await download(files, workPath, meta);
-  const entrypointFsDirname = join(workPath, dirname(entrypoint));
-  const nodeVersion = await getNodeVersion(
-    entrypointFsDirname,
-    undefined,
-    config,
-    meta
-  );
+  const nodeVersion = await getNodeVersion(baseDir, undefined, config, meta);
   const spawnOpts = getSpawnOptions(meta, nodeVersion);
-  await runNpmInstall(entrypointFsDirname, [], spawnOpts, meta, nodeVersion);
+  await runNpmInstall(baseDir, [], spawnOpts, meta, nodeVersion);
   const entrypointPath = downloadedFiles[entrypoint].fsPath;
-  return { entrypointPath, entrypointFsDirname, nodeVersion, spawnOpts };
+  return { entrypointPath, nodeVersion, spawnOpts };
 }
 
 function getAWSLambdaHandler(entrypoint: string, config: Config) {
@@ -69,6 +80,10 @@ async function getPreparedFiles(
   config: Config
 ) {
   const preparedFiles: Files = {};
+  const inputFiles = new Set<string>([join(baseDir, nestEntry)]);
+
+  const sourceCache = new Map<string, string | Buffer | null>();
+  const fsCache = new Map<string, File>();
 
   if (config.includeFiles) {
     const includeFiles =
@@ -88,40 +103,122 @@ async function getPreparedFiles(
     }
   }
 
-  const distFiles = await glob('dist/**/*', workPath);
+  const { fileList, warnings } = await nodeFileTrace([...inputFiles], {
+    base: baseDir,
+    processCwd: workPath,
+    mixedModules: true,
+    resolve(id, parent, job, cjsResolve) {
+      const normalizedWasmImports = id.replace(/\.wasm\?module$/i, '.wasm');
+      return nftResolveDependency(
+        normalizedWasmImports,
+        parent,
+        job,
+        cjsResolve
+      );
+    },
+    ignore: config.excludeFiles,
+    async readFile(fsPath) {
+      const relPath = relative(baseDir, fsPath);
 
-  Object.values(distFiles).forEach(async (entry) => {
-    const { fsPath } = entry;
-    const relPath = relative(baseDir, fsPath);
-    preparedFiles[relPath] = entry;
+      // If this file has already been read then return from the cache
+      const cached = sourceCache.get(relPath);
+      if (typeof cached !== 'undefined') return cached;
+
+      try {
+        let entry: File | undefined;
+        let source: string | Buffer = readFileSync(fsPath);
+
+        const { mode } = lstatSync(fsPath);
+        if (isSymbolicLink(mode)) {
+          entry = new FileFsRef({ fsPath, mode });
+        }
+
+        if (!entry) {
+          entry = new FileBlob({ data: source, mode });
+        }
+        fsCache.set(relPath, entry);
+        sourceCache.set(relPath, source);
+        return source;
+      } catch (error: unknown) {
+        if (
+          isErrnoException(error) &&
+          (error.code === 'ENOENT' || error.code === 'EISDIR')
+        ) {
+          // `null` represents a not found
+          sourceCache.set(relPath, null);
+          return null;
+        }
+        throw error;
+      }
+    },
   });
+
+  for (const warning of warnings) {
+    console.log(`Warning from trace: ${warning.message}`);
+  }
+  for (const path of fileList) {
+    let entry = fsCache.get(path);
+    if (!entry) {
+      const fsPath = resolve(baseDir, path);
+      const { mode } = lstatSync(fsPath);
+      if (isSymbolicLink(mode)) {
+        entry = new FileFsRef({ fsPath, mode });
+      } else {
+        const source = readFileSync(fsPath);
+        entry = new FileBlob({ data: source, mode });
+      }
+    }
+    if (isSymbolicLink(entry.mode) && entry.type === 'FileFsRef') {
+      // ensure the symlink target is added to the file list
+      const symlinkTarget = relative(
+        baseDir,
+        resolve(dirname(entry.fsPath), readlinkSync(entry.fsPath))
+      );
+      if (
+        !symlinkTarget.startsWith('..' + sep) &&
+        !fileList.has(symlinkTarget)
+      ) {
+        const stats = statSync(resolve(baseDir, symlinkTarget));
+        if (stats.isFile()) {
+          fileList.add(symlinkTarget);
+        }
+      }
+    }
+
+    preparedFiles[path] = entry;
+  }
 
   return {
     preparedFiles,
   };
 }
 
-export const build: BuildV3 = async ({
-  files,
-  entrypoint,
-  workPath,
-  repoRootPath,
-  config = {},
-  meta = {},
-}) => {
+export const build: BuildV3 = async (options) => {
+  console.log('build options', options);
+  const { name, version } = await import('../package.json');
+  console.log(`using ${name}@${version}`);
+  const {
+    files,
+    entrypoint,
+    workPath,
+    repoRootPath,
+    config = {},
+    meta = {},
+  } = options;
   const baseDir = repoRootPath || workPath;
   const awsLambdaHandler = getAWSLambdaHandler(entrypoint, config);
+  console.log('download and install...');
+  const { nodeVersion, spawnOpts } = await downloadInstallAndBundle({
+    files,
+    entrypoint,
+    workPath,
+    config,
+    meta,
+    baseDir,
+  });
 
-  const { entrypointPath, entrypointFsDirname, nodeVersion, spawnOpts } =
-    await downloadInstallAndBundle({
-      files,
-      entrypoint,
-      workPath,
-      config,
-      meta,
-    });
-
-  await runPackageJsonScript(entrypointFsDirname, ['build'], spawnOpts);
+  console.log('run packageJson build script...');
+  await runPackageJsonScript(baseDir, ['build'], spawnOpts);
 
   const isMiddleware = config.middleware === true;
 
@@ -130,17 +227,17 @@ export const build: BuildV3 = async ({
   // `export const config = { runtime: 'edge' }`
   let isEdgeFunction = isMiddleware;
 
-  debug('Tracing input files...');
+  console.log('Tracing input files...');
   const traceTime = Date.now();
   const { preparedFiles } = await getPreparedFiles(workPath, baseDir, config);
 
-  debug(`Trace complete [${Date.now() - traceTime}ms]`);
+  console.log(`Trace complete [${Date.now() - traceTime}ms]`);
 
   let routes: BuildResultV3['routes'];
   let output: BuildResultV3['output'] | undefined;
 
-  const handler = relative(baseDir, 'dist/main.js');
-
+  const handler = relative(baseDir, nestEntry);
+  console.log('handler', handler);
   // Add a `route` for Middleware
   if (isMiddleware) {
     if (!isEdgeFunction) {
@@ -152,7 +249,7 @@ export const build: BuildV3 = async ({
 
     // Middleware is a catch-all for all paths unless a `matcher` property is defined
     const src = getRegExpFromMatchers(config.matcher);
-
+    console.log('src', src);
     const middlewareRawSrc: string[] = [];
     if (config?.matcher) {
       if (Array.isArray(config.matcher)) {
@@ -165,8 +262,9 @@ export const build: BuildV3 = async ({
     routes = [
       {
         src,
+        dest: nestEntry,
         middlewareRawSrc,
-        middlewarePath: entrypoint,
+        middlewarePath: handler,
         continue: true,
         override: true,
       },

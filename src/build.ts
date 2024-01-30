@@ -194,7 +194,6 @@ async function getPreparedFiles(
 }
 
 export const build: BuildV3 = async (options) => {
-  console.log('build options', options);
   const { name, version } = await import('../package.json');
   console.log(`using ${name}@${version}`);
   const {
@@ -262,7 +261,7 @@ export const build: BuildV3 = async (options) => {
     routes = [
       {
         src,
-        dest: nestEntry,
+        dest: entrypoint,
         middlewareRawSrc,
         middlewarePath: handler,
         continue: true,

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### 0.0.6 (2024-01-31)
+
+### Features
+
+- Support swagger-ui ([fb81f8a](https://github.com/dongwa/vercel-nest/commit/fb81f8a4ecd5d4e6d20771860a70e8c77af86c45))
+
 ### 0.0.5 (2024-01-31)
 
 ### Features

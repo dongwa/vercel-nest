@@ -6,6 +6,16 @@ Help you to deploy [Nestjs](https://docs.nestjs.com/) application on [Vercel](ht
 
 # Usage
 
+## 1. Add build command to `package.json`
+
+```json
+{
+  "scripts": {
+    "build": "nest build"
+  }
+}
+```
+
 ## 1. Configure `vercel-nest` as builder in `vercel.json`
 
 ### Add a `vercel.json` file to your project root path
@@ -20,3 +30,20 @@ Help you to deploy [Nestjs](https://docs.nestjs.com/) application on [Vercel](ht
   ]
 }
 ```
+
+# How to work
+
+1. Using the `npm run build` command to build the project. You need to define the build command in your `package.json`,
+   for example:
+
+```json
+{
+  "scripts": {
+    "build": "nest build"
+  }
+}
+```
+
+2. Using `dist/main.js` as the entry point of the program, and retrieve all its dependency files to build the Vercel Lambda function, named `index`.
+
+3. Define a `routes` to forward all requests to `index`.

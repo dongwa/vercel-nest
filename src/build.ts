@@ -22,11 +22,8 @@ import type {
   Files,
   Meta,
   Config,
-  BuildV3,
-  BuildResultV3,
   File,
   BuildV2,
-  BuildResultV2,
   BuildResultV2Typical,
 } from '@vercel/build-utils';
 import { nodeFileTrace } from '@vercel/nft';

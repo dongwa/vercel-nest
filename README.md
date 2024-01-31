@@ -2,7 +2,7 @@
 
 Vercel builder for Nestjs
 
-Help you to deploy [Nestjs](https://docs.nestjs.com/) application on [Vercel](https://vercel.com) in SSR mode
+Help you to deploy [Nestjs](https://docs.nestjs.com/) application on [Vercel](https://vercel.com)
 
 # Usage
 

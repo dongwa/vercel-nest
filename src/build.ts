@@ -10,7 +10,7 @@ import {
   FileFsRef,
   FileBlob,
 } from '@vercel/build-utils';
-import {
+import path, {
   dirname,
   join,
   relative,
@@ -30,6 +30,7 @@ import { nodeFileTrace } from '@vercel/nft';
 import nftResolveDependency from '@vercel/nft/out/resolve-dependency';
 import { readFileSync, lstatSync, readlinkSync, statSync } from 'fs';
 import { isErrnoException } from '@vercel/error-utils';
+
 // nestjs default entry
 const nestEntry = 'dist/main.js';
 const nestLambdaName = 'index';
@@ -218,13 +219,6 @@ export const build: BuildV2 = async (options) => {
   console.log('run packageJson build script...');
   await runPackageJsonScript(baseDir, ['build'], spawnOpts);
 
-  const isMiddleware = config.middleware === true;
-
-  // Will output an `EdgeFunction` for when `config.middleware = true`
-  // (i.e. for root-level "middleware" file) or if source code contains:
-  // `export const config = { runtime: 'edge' }`
-  let isEdgeFunction = isMiddleware;
-
   console.log('Tracing input files...');
   const traceTime = Date.now();
   const { preparedFiles } = await getPreparedFiles(workPath, baseDir, config);
@@ -232,13 +226,35 @@ export const build: BuildV2 = async (options) => {
   console.log(`Trace complete [${Date.now() - traceTime}ms]`);
 
   let routes: BuildResultV2Typical['routes'];
-  let output: BuildResultV2Typical['output'] | undefined;
+  let output: BuildResultV2Typical['output'] = {};
 
   const handler = relative(baseDir, nestEntry);
   console.log('handler', handler);
 
+  const customStaticRoute: any[] = (config.routes as any[]) ?? [];
+
+  if (typeof config.swagger === 'string') {
+    const swagger =
+      config.swagger[0] !== '/' ? `/${config.swagger}` : config.swagger;
+
+    const swaggerUIPath = require(require.resolve(
+      '@nestjs/swagger/dist/swagger-ui/swagger-ui',
+      {
+        paths: [baseDir],
+      }
+    )).getSwaggerAssetsAbsoluteFSPath();
+
+    const swaggerOutputs = await glob('**', swaggerUIPath, swagger);
+    for (const swaggerSrc in swaggerOutputs) {
+      output[swaggerSrc] = swaggerOutputs[swaggerSrc];
+      output[`${swagger}${swaggerSrc}`] = swaggerOutputs[swaggerSrc];
+    }
+  }
+
   // @TODO：support config routes and static routes
   routes = [
+    ...customStaticRoute,
+
     {
       src: '/(.*)',
       dest: `/${nestLambdaName}`,
@@ -252,16 +268,15 @@ export const build: BuildV2 = async (options) => {
 
   const supportsResponseStreaming = config?.supportsResponseStreaming === true;
 
-  output = {
-    [nestLambdaName]: new NodejsLambda({
-      files: preparedFiles,
-      handler,
-      runtime: nodeVersion.runtime,
-      shouldAddHelpers,
-      shouldAddSourcemapSupport: false,
-      awsLambdaHandler,
-      supportsResponseStreaming,
-    }),
-  };
+  output[nestLambdaName] = new NodejsLambda({
+    files: preparedFiles,
+    handler,
+    runtime: nodeVersion.runtime,
+    shouldAddHelpers,
+    shouldAddSourcemapSupport: false,
+    awsLambdaHandler,
+    supportsResponseStreaming,
+  });
+
   return { routes, output };
 };

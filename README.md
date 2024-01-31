@@ -31,6 +31,23 @@ Help you to deploy [Nestjs](https://docs.nestjs.com/) application on [Vercel](ht
 }
 ```
 
+## Support Swagger-ui
+
+```json
+{
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "vercel-nest",
+      "config": {
+        // change "docs" to your 'path' of SwaggerModule.setup(path, app, document);
+        "swagger": "docs"
+      }
+    }
+  ]
+}
+```
+
 # How to work
 
 1. Using the `npm run build` command to build the project. You need to define the build command in your `package.json`,

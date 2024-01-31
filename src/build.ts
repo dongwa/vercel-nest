@@ -246,15 +246,23 @@ export const build: BuildV2 = async (options) => {
 
     const swaggerOutputs = await glob('**', swaggerUIPath, swagger);
     for (const swaggerSrc in swaggerOutputs) {
-      output[swaggerSrc] = swaggerOutputs[swaggerSrc];
-      output[`${swagger}${swaggerSrc}`] = swaggerOutputs[swaggerSrc];
+      if (swaggerSrc.endsWith('.map')) continue;
+      const relaPath = relative(baseDir, swaggerOutputs[swaggerSrc].fsPath);
+      output[relaPath] = swaggerOutputs[swaggerSrc];
+      customStaticRoute.push({
+        src: swaggerSrc,
+        dest: `/${relaPath}`,
+      });
+      customStaticRoute.push({
+        src: `${swagger}${swaggerSrc}`,
+        dest: `/${relaPath}`,
+      });
     }
   }
 
   // @TODO：support config routes and static routes
   routes = [
     ...customStaticRoute,
-
     {
       src: '/(.*)',
       dest: `/${nestLambdaName}`,
